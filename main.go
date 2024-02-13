@@ -1,67 +1,48 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"net/http"
+
+	"github.com/go-chi/chi/v5"
 )
 
 type apiConfig struct {
 	fileserverHits int
 }
 
-func (c *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        // Incrementa el contador con cada petición.
-        c.fileserverHits++
-
-        // Continúa con el manejo de la petición.
-        next.ServeHTTP(w, r)
-    })
-}
-
-
-
-
-func (c *apiConfig) handlerMetrics(w http.ResponseWriter, r *http.Request) {
-
-	w.Header().Add("Content-Type", "text/plain; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	result := fmt.Sprint("Hits: ", c.fileserverHits)
-	w.Write([]byte(result))
-}
-func (c *apiConfig) resetMetrics(w http.ResponseWriter, r *http.Request) {
-
-	c.fileserverHits = 0
-}
 
 func main() {
 	const filepathRoot = "."
 	const port = "8080"
 
+	router := chi.NewRouter()
+	apiRouter := chi.NewRouter()
+	adminRouter := chi.NewRouter()
+
+	corsChi := middlewareCors(router)
+
+	router.Mount("/api", apiRouter)
+	router.Mount("/admin", adminRouter)
+
 	apiCfg := apiConfig{
 		fileserverHits: int(0),
 	}
 
-	mux := http.NewServeMux()
-	mux.Handle("/app/", http.StripPrefix("/app/", apiCfg.middlewareMetricsInc(http.FileServer(http.Dir(filepathRoot)))))
+	fsHandler := apiCfg.middlewareMetricsInc(http.StripPrefix("/app", http.FileServer(http.Dir(filepathRoot))))
+	router.Handle("/app", fsHandler)
+	router.Handle("/app/*", fsHandler)
 
-	mux.HandleFunc("/healthz", handlerReadiness)
-	mux.HandleFunc("/app/assets", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, filepathRoot+"/assets/index.html")
+	apiRouter.Get("/healthz", handlerReadiness)
+	apiRouter.Get("/reset", apiCfg.resetMetrics)
 
-	})
-	mux.HandleFunc("/metrics", apiCfg.handlerMetrics)
-	mux.HandleFunc("/reset", apiCfg.resetMetrics)
-	corsMux := middlewareCors(mux)
+	adminRouter.Get("/metrics", apiCfg.handlerMetrics)
 
 	srv := &http.Server{
 		Addr:    ":" + port,
-		Handler: corsMux,
+		Handler: corsChi,
 	}
 
 	log.Printf("Serving files from %s on port: %s\n", filepathRoot, port)
 	log.Fatal(srv.ListenAndServe())
 }
-
-
