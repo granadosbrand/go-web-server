@@ -8,13 +8,17 @@ import (
 	"os"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/granadosbrand/go-web-server/api/handlers"
+	"github.com/granadosbrand/go-web-server/config"
+	"github.com/joho/godotenv"
 )
 
-type apiConfig struct {
-	fileserverHits int
-}
-
 func main() {
+
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
 
 	dbg := flag.Bool("debug", false, "Enable debug mode")
 	flag.Parse() // Parsea los argumentos de la línea de comandos
@@ -34,8 +38,9 @@ func main() {
 
 	const filepathRoot = "."
 	const port = "8080"
-	apiCfg := apiConfig{
-		fileserverHits: int(0),
+	apiCfg := &config.ApiConfig{
+		FileserverHits: int(0),
+		JwtSecret:      os.Getenv("JWT_SECRET"),
 	}
 
 	// Routers: ==================================
@@ -49,18 +54,22 @@ func main() {
 	router.Mount("/api", apiRouter)
 	router.Mount("/admin", adminRouter)
 
-	fsHandler := apiCfg.middlewareMetricsInc(http.StripPrefix("/app", http.FileServer(http.Dir(filepathRoot))))
+	fsHandler := apiCfg.MiddlewareMetricsInc(http.StripPrefix("/app", http.FileServer(http.Dir(filepathRoot))))
 	router.Handle("/app", fsHandler)
 	router.Handle("/app/*", fsHandler)
 
 	apiRouter.Get("/healthz", handlerReadiness)
-	apiRouter.Get("/reset", apiCfg.resetMetrics)
-	apiRouter.Post("/chirps", handleChirpPost)
-	apiRouter.Get("/chirps", handleChirpGet)
-	apiRouter.Get("/chirps/{chirpId}", handleChirpByID)
-	apiRouter.Post("/users", handleCreateUser)
+	apiRouter.Get("/reset", func(w http.ResponseWriter, r *http.Request) { handlers.ResetMetrics(apiCfg, w, r) })
+	apiRouter.Post("/chirps", handlers.HandleChirpPost)
+	apiRouter.Get("/chirps", handlers.HandleChirpGet)
+	apiRouter.Get("/chirps/{chirpId}", handlers.HandleChirpByID)
+	apiRouter.Post("/users", handlers.HandleCreateUser)
+	apiRouter.Post("/login", func(w http.ResponseWriter, r *http.Request) { handlers.HandleLogin(apiCfg, w, r) })
+	apiRouter.Put("/users", func(w http.ResponseWriter, r *http.Request) { handlers.HandleUpdateUser(apiCfg, w, r) })
 
-	adminRouter.Get("/metrics", apiCfg.handlerMetrics)
+	adminRouter.Get("/metrics", func(w http.ResponseWriter, r *http.Request) {handlers.HandlerMetrics(apiCfg, w, r)})
+
+
 
 	// ===========================================
 

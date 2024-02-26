@@ -1,11 +1,14 @@
 package database
 
 import (
+	"fmt"
 	"log"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 // CreateChirp creates a new chirp and saves it to disk
-func (db *DB) CreateUser(email string) (User, error) {
+func (db *DB) CreateUser(email, password string) (User, error) {
 
 	err := db.EnsureDB()
 	if err != nil {
@@ -17,11 +20,18 @@ func (db *DB) CreateUser(email string) (User, error) {
 		return User{}, err
 	}
 
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		fmt.Println(err)
+		return User{}, err
+	}
+
 	idKey := len(dbData.Users) + 1
 
 	userData := User{
-		Email: email,
-		Id:   idKey,
+		Email:    email,
+		Password: string(hash),
+		Id:       idKey,
 	}
 
 	dbData.Users[idKey] = userData
