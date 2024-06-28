@@ -4,81 +4,77 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 )
 
 type parameters struct {
-	Body string
+	Body string `json:"body"`
+}
+type returnVals struct {
+	CleanedBody string `json:"cleaned_body"`
 }
 
-type errorResponse struct {
-	Error string
-}
+func handlerChirpsValidate(w http.ResponseWriter, r *http.Request) {
 
-type validResponse struct {
-	Valid bool `json:"valid"`
-}
-
-func respondWithJson(w http.ResponseWriter, code int, payload interface{}) error {
-	response, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.WriteHeader(code)
-	w.Write(response)
-	return nil
-}
-
-// func respondWithError(w http.ResponseWriter, code int, msg string) error {
-// 	return respondWithJson(w, code, map[string]string{"error": msg})
-// }
-
-func handlerValidateChirp(w http.ResponseWriter, r *http.Request) {
 	decoder := json.NewDecoder(r.Body)
 	params := parameters{}
 	err := decoder.Decode(&params)
 	if err != nil {
-		log.Printf("Error decoding parameters: %s", err)
-		w.WriteHeader(500)
-	}
-
-	messageLen := len(params.Body)
-
-	if messageLen > 140 {
-		lenErr := errorResponse{
-			Error: "Chirp is too long",
-		}
-
-		dat, err := json.Marshal(lenErr)
-		if err != nil {
-			marshalErr := errorResponse{
-				Error: "Something went wrong",
-			}
-
-			_ = respondWithJson(w, 200, marshalErr)
-
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(400)
-		w.Write(dat)
-
+		respondWithError(w, http.StatusInternalServerError, "Couldn't decode parameters")
 		return
 	}
 
-	validRes := validResponse{
-		Valid: true,
+	const maxChirpLength = 140
+	if len(params.Body) > maxChirpLength {
+		respondWithError(w, http.StatusBadRequest, "Chirp is too long")
+		return
 	}
 
-	err = respondWithJson(w, 200, validRes)
-	if err != nil {
-		marshalErr := errorResponse{
-			Error: "Something went wrong",
+	badWords := map[string]struct{}{
+		"kerfuffle": {},
+		"sharbert":  {},
+		"fornax":    {},
+	}
+
+	cleaned := getCleanedBody(params.Body, badWords)
+
+	respondWithJSON(w, http.StatusOK, returnVals{
+		CleanedBody: cleaned,
+	})
+}
+
+func getCleanedBody(body string, badWords map[string]struct{}) string {
+	words := strings.Split(body, " ")
+	for i, word := range words {
+		loweredWord := strings.ToLower(word)
+		if _, ok := badWords[loweredWord]; ok {
+			words[i] = "****"
 		}
-
-		respondWithJson(w, 200, marshalErr)
 	}
+	cleaned := strings.Join(words, " ")
+	return cleaned
+}
 
+func respondWithError(w http.ResponseWriter, code int, msg string) {
+	if code > 499 {
+		log.Printf("Responding with 5XX error: %s", msg)
+	}
+	type errorResponse struct {
+		Error string `json:"error"`
+	}
+	respondWithJSON(w, code, errorResponse{
+		Error: msg,
+	})
+}
+
+func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	dat, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("Error marshalling JSON: %s", err)
+		w.WriteHeader(500)
+		return
+	}
+	w.WriteHeader(code)
+	w.Write(dat)
 }
